@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CalculationResult } from './types';
 import { generateAnalysis } from './services/geminiService';
 import { InfoTooltip } from './components/InfoTooltip';
-import { Calculator, Activity, Sparkles, RefreshCw, FileText, Mic, MicOff, Volume2, ArrowRightLeft, X } from 'lucide-react';
+import { Calculator, Activity, Sparkles, RefreshCw, FileText, Mic, MicOff, Volume2, ArrowRightLeft, X, Key } from 'lucide-react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, LiveSession } from "@google/genai";
 
 const App: React.FC = () => {
@@ -12,6 +12,7 @@ const App: React.FC = () => {
   const [results, setResults] = useState<CalculationResult | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
   const [isLoadingAi, setIsLoadingAi] = useState<boolean>(false);
+  const [hasApiKey, setHasApiKey] = useState<boolean>(false);
 
   // Live API State
   const [isLiveActive, setIsLiveActive] = useState(false);
@@ -22,6 +23,30 @@ const App: React.FC = () => {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+
+  // Check for API Key on mount
+  useEffect(() => {
+    const checkKey = async () => {
+      const aiStudio = (window as any).aistudio;
+      if (aiStudio) {
+        const hasKey = await aiStudio.hasSelectedApiKey();
+        setHasApiKey(hasKey);
+      } else {
+        // Fallback for environments where window.aistudio might not exist but env var does
+        setHasApiKey(!!process.env.API_KEY);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleSelectKey = async () => {
+    const aiStudio = (window as any).aistudio;
+    if (aiStudio) {
+      await aiStudio.openSelectKey();
+      // Assume success after dialog closes
+      setHasApiKey(true);
+    }
+  };
 
   // Core Calculation Logic
   const calculate = useCallback((amount: number, mode: 'original' | 'new') => {
@@ -81,9 +106,20 @@ const App: React.FC = () => {
   };
 
   const handleAiAnalysis = async () => {
-    if (!results || !process.env.API_KEY) return;
+    if (!results) return;
+    
+    const aiStudio = (window as any).aistudio;
+    if (!hasApiKey && aiStudio) {
+       await handleSelectKey();
+       // Re-check logic would go here, but for now we assume user selected key
+    }
+
+    if (!process.env.API_KEY && !hasApiKey) {
+      alert("Please select an API Key first.");
+      return;
+    }
+
     setIsLoadingAi(true);
-    // Note: We might want to pass the mode to analysis too, but the results object has the computed values
     const analysis = await generateAnalysis(results, parseFloat(mrpInput));
     setAiAnalysis(analysis);
     setIsLoadingAi(false);
@@ -159,8 +195,13 @@ const App: React.FC = () => {
       return;
     }
 
-    if (!process.env.API_KEY) {
-      alert("API Key is missing.");
+    const aiStudio = (window as any).aistudio;
+    if (!hasApiKey && aiStudio) {
+      await handleSelectKey();
+    }
+
+    if (!process.env.API_KEY && !hasApiKey) {
+      alert("API Key is missing. Please select a key.");
       return;
     }
 
@@ -176,6 +217,7 @@ const App: React.FC = () => {
       nextStartTimeRef.current = outputCtx.currentTime;
 
       // Setup Gemini Client
+      // Create new instance to ensure we pick up the latest key if it was just selected
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       const updateMrpTool: FunctionDeclaration = {
@@ -357,6 +399,20 @@ const App: React.FC = () => {
             <span className="text-xl font-bold text-slate-900 tracking-tight">PharmaCalc <span className="text-brand-600">SaaS</span></span>
           </div>
           <div className="flex items-center gap-4">
+             {(window as any).aistudio && (
+              <button
+                onClick={handleSelectKey}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  hasApiKey
+                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                  : 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse'
+                }`}
+              >
+                <Key className="w-3.5 h-3.5" />
+                {hasApiKey ? 'API Key Active' : 'Select API Key'}
+              </button>
+            )}
+
             <button 
               onClick={toggleLive}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
@@ -601,22 +657,20 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 
-                {process.env.API_KEY && (
-                  <button 
-                    onClick={handleAiAnalysis}
-                    disabled={isLoadingAi}
-                    className="w-full md:w-auto flex justify-center items-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium text-sm transition-all whitespace-nowrap"
-                  >
-                    {isLoadingAi ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
-                    {isLoadingAi ? 'Analyzing...' : 'Generate Report'}
-                  </button>
-                )}
+                <button 
+                  onClick={handleAiAnalysis}
+                  disabled={isLoadingAi}
+                  className="w-full md:w-auto flex justify-center items-center gap-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium text-sm transition-all whitespace-nowrap"
+                >
+                  {isLoadingAi ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
+                  {isLoadingAi ? 'Analyzing...' : 'Generate Report'}
+                </button>
               </div>
               
               <div className="bg-white/5 rounded-xl p-4 border border-white/10 min-h-[60px]">
-                 {!process.env.API_KEY ? (
+                 {!hasApiKey && !process.env.API_KEY ? (
                    <p className="text-slate-400 text-sm text-center">
-                     AI features require an API Key.
+                     Please select an API Key to use AI features.
                    </p>
                  ) : aiAnalysis ? (
                    <p className="text-slate-200 text-sm leading-relaxed">{aiAnalysis}</p>
