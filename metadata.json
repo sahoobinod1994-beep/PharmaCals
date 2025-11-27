@@ -1,0 +1,7 @@
+{
+  "name": "Copy of PharmaCalcs SaaS",
+  "description": "Professional Pharmacy New Rule GST & Margin Calculator with AI Insights",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
